@@ -1,19 +1,22 @@
-/*  extractor.c - InsydeFlash BIOS image extractor v0.2
-    Author: Nikolaj Schlej
+/*  extractor.c - InsydeFlash BIOS image extractor
+    Author: Nikolaj Schlej, v0.2
     License: WTFPL
-    Modified: genBTC , 9/15/2019 
+    Author: genBTC, v0.3
+    Modified: genBTC , v0.3+
     - v0.3 (adds additional extractions and changes command line arguments)
     - v0.31 (adds the injector for platforms.ini)
-    - v0.32 removed code redundancy. converted each step down to a common function call. 9/29
+    - v0.32 removed code redundancy. converted each step down to a common function call. 9/29/19
+    - v0.33 fix Compilation for GCC 13+ Modern C syntax update 8/15/24
 */
 
-#define PROGRAM_NAME "InsydeFlashExtractor v0.32+genBTC\n"
+#define PROGRAM_NAME "InsydeFlashExtractor v0.33+genBTC\n"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 #include <stdint.h>
+#include <unistd.h>
 
 #define ERR_SUCCESS             0
 #define ERR_NOT_FOUND           1
@@ -23,7 +26,7 @@
 #define ERR_INVALID_PARAMETER   5
 #define ERR_OUT_OF_MEMORY       6
 
-#define IFLASH_SIGNATURE_LENGTH 16 
+#define IFLASH_SIGNATURE_LENGTH 16
 
 typedef struct _IFLASH_HEADER {
     uint8_t  Signature[IFLASH_SIGNATURE_LENGTH];
@@ -31,28 +34,28 @@ typedef struct _IFLASH_HEADER {
     uint32_t UsedSize;
 } IFLASH_HEADER;
 
-const uint8_t IFLASH_BIOSIMG_SIGNATURE[] = { 
-    0x24, 0x5F, 0x49, 0x46, 0x4C, 0x41, 0x53, 0x48, 0x5F, 
+const uint8_t IFLASH_BIOSIMG_SIGNATURE[] = {
+    0x24, 0x5F, 0x49, 0x46, 0x4C, 0x41, 0x53, 0x48, 0x5F,
     0x42, 0x49, 0x4F, 0x53, 0x49, 0x4D, 0x47
 }; // $_IFLASH_BIOSIMG
 
 const uint8_t IFLASH_INI_IMG_SIGNATURE[] = {
-    0x24, 0x5F, 0x49, 0x46, 0x4C, 0x41, 0x53, 0x48, 0x5F, 
+    0x24, 0x5F, 0x49, 0x46, 0x4C, 0x41, 0x53, 0x48, 0x5F,
     0x49, 0x4E, 0x49, 0x5F, 0x49, 0x4D, 0x47
 }; // $_IFLASH_INI_IMG
 
 const uint8_t IFLASH_EC_IMG_SIGNATURE[] = {
-    0x24, 0x5F, 0x49, 0x46, 0x4C, 0x41, 0x53, 0x48, 0x5F, 
+    0x24, 0x5F, 0x49, 0x46, 0x4C, 0x41, 0x53, 0x48, 0x5F,
     0x45, 0x43, 0x5F, 0x49, 0x4D, 0x47, 0x5F,
 }; // $_IFLASH_EC_IMG_
 
 const uint8_t IFLASH_DRV_IMG_SIGNATURE[] = {
-    0x24, 0x5F, 0x49, 0x46, 0x4C, 0x41, 0x53, 0x48, 0x5F, 
+    0x24, 0x5F, 0x49, 0x46, 0x4C, 0x41, 0x53, 0x48, 0x5F,
     0x44, 0x52, 0x56, 0x5F, 0x49, 0x4D, 0x47
-}; // $_IFLASH_DRV_IMG 
+}; // $_IFLASH_DRV_IMG
 
 const uint8_t IFLASH_BIOSCER_SIGNATURE[] = {
-    0x24, 0x5F, 0x49, 0x46, 0x4C, 0x41, 0x53, 0x48, 0x5F, 
+    0x24, 0x5F, 0x49, 0x46, 0x4C, 0x41, 0x53, 0x48, 0x5F,
     0x42, 0x49, 0x4F, 0x53, 0x43, 0x45, 0x52
 };  // $_IFLASH_BIOSCER
 
@@ -93,7 +96,6 @@ uint8_t* find_pattern(uint8_t* begin, uint8_t* end, const uint8_t* pattern, size
     return NULL;
 }
 
-
 typedef struct _GetFile {
     char * file_name;
     FILE * the_file;
@@ -104,7 +106,7 @@ typedef struct _GetFile {
     int returnStatus;
 } GetFile;
 
-//prototype include (extractor.h)
+//Forward Declarations Prototypes
 int extract_file(uint8_t* insyde_buffer, uint8_t* end, const char* file_name, const uint8_t* signature);
 GetFile read_GetFile(const char* file_name);
 
@@ -130,9 +132,17 @@ int main(int argc, char* argv[])
         insyde_file_name = argv[1];
     }
 
+    /* Make sure File exists to continue */
+    if (access(insyde_file_name, F_OK ) == -1)
+    {
+        printf("INPUTBIOSFILE file: %s - File NOT Found!\n", insyde_file_name);
+        return ERR_NOT_FOUND;
+    }
+
     /* Read File in, create buffer*/
     File1 = read_GetFile(insyde_file_name);
-    if (File1.returnStatus != 0) return File1.returnStatus;
+    if (File1.returnStatus != 0)
+        return File1.returnStatus;
 
     inject_ini = (argc >= 3) ? 1 : 0 ;
 //INJECTOR: Detect if we are injecting the .ini back in, from command line
@@ -160,7 +170,7 @@ int main(int argc, char* argv[])
 
         if (File2.filesize > ini_header->FullSize)
         {
-            printf(".ini file size %lu exceeds max allowable size %lu", File2.filesize, ini_header->FullSize);
+            printf(".ini file size %u exceeds max allowable size %u", File2.filesize, ini_header->FullSize);
             return ERR_FILE_WRITE;
         }
         // Write:
@@ -176,7 +186,7 @@ int main(int argc, char* argv[])
         }
         else
         {
-            printf("Wrote %lu byte header to %lu\n", headersize, File2.found - File2.buffer);
+            printf("Wrote %u byte header to %lu\n", headersize, File2.found - File2.buffer);
         }
         /* Write .INI file image to output file */
         uint32_t filesize = fwrite(File2.buffer, sizeof(char), File2.filesize, File1.the_file);
@@ -187,7 +197,7 @@ int main(int argc, char* argv[])
         }
         else
         {
-            printf("Wrote %lu bytes\n", filesize);
+            printf("Wrote %u bytes\n", filesize);
         }
         /* Done */
         printf("File %s successfully injected back into %s\n", ini_file_name, insyde_file_name);
@@ -205,7 +215,7 @@ int main(int argc, char* argv[])
     extract_file(File1.buffer, File1.end, bios_cert_file_name, IFLASH_BIOSCER_SIGNATURE);
     //Part 5: $_IFLASH_DRV_IMG (most of the file)
     //extract_file(insyde_buffer, end, drvimg_file_name, IFLASH_DRV_IMG_SIGNATURE);
-    return;
+    return ERR_SUCCESS;
 }
 
 int extract_file(uint8_t* insyde_buffer, uint8_t* end, const char* file_name, const uint8_t* signature)
@@ -225,7 +235,7 @@ int extract_file(uint8_t* insyde_buffer, uint8_t* end, const char* file_name, co
 
     /* Open output file */
     FILE*    out_file;
-    if (fopen_s(&out_file, file_name, "wb"))
+    if (out_file = fopen(file_name, "wb"))
     {
         printf("Output file %s can't be opened", file_name);
         return ERR_FILE_OPEN;
@@ -248,11 +258,16 @@ int extract_file(uint8_t* insyde_buffer, uint8_t* end, const char* file_name, co
 GetFile read_GetFile(const char* file_name)
 {
     GetFile File1;
-    File1.file_name = file_name;
+    File1.file_name = (char *)file_name;
+
     /* Open isflash.bin file as input */
-    if (fopen_s(&File1.the_file, file_name, "r+b"))
+    if (File1.the_file = fopen(file_name, "r+b"))
     {
-        printf("InsydeFlash input file can't be opened: %s", file_name);
+        printf("InsydeFlash input file opened successfully!: %s", file_name);
+    }
+    else
+    {
+        printf("InsydeFlash input file can't be opened :( : %s", file_name);
         File1.returnStatus = ERR_FILE_OPEN;
         return File1;
     }
